@@ -1,0 +1,19 @@
+{
+  "name": "pi-chat-poc",
+  "private": true,
+  "engines": {
+    "node": "^22.19.0 || ^24 || >=26"
+  },
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"npm run dev -w server\" \"npm run dev -w web\"",
+    "build": "npm run build -w web",
+    "start": "npm run build && SERVE_WEB=1 npm run start -w server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

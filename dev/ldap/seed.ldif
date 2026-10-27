@@ -1,0 +1,50 @@
+# Seed data for local OpenLDAP (dc=example,dc=com)
+# Passwords (SSHA): service=servicepass, jdoe=password123, appadmin=adminpass
+
+dn: ou=people,dc=example,dc=com
+objectClass: organizationalUnit
+ou: people
+
+dn: ou=groups,dc=example,dc=com
+objectClass: organizationalUnit
+ou: groups
+
+dn: cn=service,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+cn: service
+sn: Service
+givenName: LDAP
+uid: service
+mail: service@example.com
+userPassword: {SSHA}upzw+UOE5oDVDAc5NtdsHdZydHYa+OtD
+
+dn: cn=jdoe,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+cn: jdoe
+sn: Doe
+givenName: Jane
+uid: jdoe
+mail: jdoe@example.com
+userPassword: {SSHA}Yb6AkgUWABmUrkHUihyHVGRGp+d0n9yx
+
+dn: cn=appadmin,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+cn: appadmin
+sn: Admin
+givenName: App
+uid: appadmin
+mail: admin@example.com
+userPassword: {SSHA}hkyGeIYcQBwubird4uOSr9ZjxU9U3ieq
+
+dn: cn=staff,ou=groups,dc=example,dc=com
+objectClass: groupOfNames
+cn: staff
+member: cn=jdoe,ou=people,dc=example,dc=com
+member: cn=appadmin,ou=people,dc=example,dc=com
+member: cn=service,ou=people,dc=example,dc=com
