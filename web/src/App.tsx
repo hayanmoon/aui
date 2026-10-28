@@ -1,173 +1,19 @@
-import {
-  AssistantRuntimeProvider,
-  useLocalRuntime,
-  type ChatModelAdapter,
-  type ChatModelRunResult,
-  type ThreadMessage,
-} from "@assistant-ui/react";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { Thread } from "@/components/assistant-ui/elements/thread.aui";
-import { Button } from "@/components/ui/button";
-import { TooltipProvider } from "@/components/ui/tooltip";
-
-function messageText(message: ThreadMessage): string {
-  return message.content
-    .filter((part) => part.type === "text")
-    .map((part) => part.text)
-    .join("");
-}
-
-type TextPart = { type: "text"; text: string };
-type ReasoningPart = { type: "reasoning"; text: string };
-type ToolPart = {
-  type: "tool-call";
-  toolCallId: string;
-  toolName: string;
-  args: Record<string, unknown>;
-  argsText: string;
-  result?: unknown;
-  isError?: boolean;
-};
-type ContentPart = TextPart | ReasoningPart | ToolPart;
-type ChatEvent = { content?: ContentPart[]; text?: string; done?: boolean; error?: string };
-type AuthUser = { username: string; email: string };
-
-async function* readEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<ChatEvent> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  while (true) {
-    const { value, done } = await reader.read();
-    buffer += decoder.decode(value, { stream: !done });
-    const frames = buffer.split("\n\n");
-    buffer = frames.pop() ?? "";
-    for (const frame of frames) {
-      const line = frame.split("\n").find((entry) => entry.startsWith("data: "));
-      if (!line) continue;
-      yield JSON.parse(line.slice(6)) as ChatEvent;
-    }
-    if (done) return;
-  }
-}
-
-function createAdapter(sessionId: string): ChatModelAdapter {
-  return {
-    async *run({ messages, abortSignal }) {
-      const user = [...messages].reverse().find((message) => message.role === "user");
-      const message = user ? messageText(user) : "";
-      const response = await fetch("/api/session/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ sessionId, message }),
-        signal: abortSignal,
-      });
-      if (!response.ok) {
-        const data = (await response.json()) as { error?: string };
-        throw new Error(data.error ?? "Chat failed");
-      }
-      if (!response.body) throw new Error("Chat failed");
-
-      let content: ContentPart[] = [];
-      for await (const event of readEvents(response.body)) {
-        if (event.error) throw new Error(event.error);
-        if (event.content) content = event.content;
-        else if (typeof event.text === "string") content = [{ type: "text", text: event.text }];
-        if (content.length === 0) continue;
-        yield { content: content as ChatModelRunResult["content"] };
-      }
-    },
-  };
-}
-
-function Chat({ sessionId }: { sessionId: string }) {
-  const adapter = useMemo(() => createAdapter(sessionId), [sessionId]);
-  const runtime = useLocalRuntime(adapter);
-  return (
-    <AssistantRuntimeProvider runtime={runtime}>
-      <TooltipProvider>
-        <Thread />
-      </TooltipProvider>
-    </AssistantRuntimeProvider>
-  );
-}
-
-function Login({
-  onLoggedIn,
-}: {
-  onLoggedIn: (user: AuthUser) => void;
-}) {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
-
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    setPending(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ username, password }),
-      });
-      const data = (await response.json()) as { user?: AuthUser; error?: string };
-      if (!response.ok || !data.user) {
-        throw new Error(data.error ?? "Login failed");
-      }
-      onLoggedIn(data.user);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Login failed");
-    } finally {
-      setPending(false);
-    }
-  };
-
-  return (
-    <main className="flex h-svh items-center justify-center px-4">
-      <form onSubmit={(event) => void submit(event)} className="flex w-full max-w-sm flex-col gap-3">
-        <h1 className="text-lg font-medium">Sign in</h1>
-        <p className="text-sm text-muted-foreground">Use your LDAP username and password.</p>
-        <label className="flex flex-col gap-1 text-sm">
-          Username
-          <input
-            className="h-9 rounded-lg border border-border bg-background px-3 outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-            name="username"
-            autoComplete="username"
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            required
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          Password
-          <input
-            className="h-9 rounded-lg border border-border bg-background px-3 outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            required
-          />
-        </label>
-        {error ? <p className="text-sm text-destructive">{error}</p> : null}
-        <Button type="submit" disabled={pending}>
-          {pending ? "Signing in…" : "Sign in"}
-        </Button>
-      </form>
-    </main>
-  );
-}
+import { useCallback, useEffect, useState } from "react";
+import { LoginForm } from "@/components/auth/login-form";
+import { ChatStage } from "@/components/chat/chat-stage";
+import { threadTitle } from "@/components/chat/thread-title";
+import type { AuthUser, ChatThread } from "@/components/chat/types";
+import { Sidebar } from "@/components/sidebar/sidebar";
+import { deleteStoredThread, listSavedChats, rememberDraft, setDraftTitle, updateStoredTitle } from "@/lib/thread-db";
 
 export function App() {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authReady, setAuthReady] = useState(false);
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [threads, setThreads] = useState<ChatThread[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -182,6 +28,7 @@ export function App() {
   }, []);
 
   const start = useCallback(async () => {
+    if (!user) return;
     setPending(true);
     setError(null);
     try {
@@ -190,50 +37,121 @@ export function App() {
       if (!response.ok || !data.sessionId) {
         throw new Error(data.error ?? "Could not start a chat");
       }
-      setSessionId(data.sessionId);
+      const thread = { id: data.sessionId, title: "New chat", readOnly: false };
+      rememberDraft(thread.id, user.username);
+      setThreads((current) => [thread, ...current]);
+      setActiveId(thread.id);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not start a chat");
     } finally {
       setPending(false);
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
-    void start();
+    let cancelled = false;
+    setHydrated(false);
+    void (async () => {
+      try {
+        const stored = await listSavedChats(user.username);
+        if (cancelled) return;
+        setThreads(stored.map((thread) => ({ id: thread.id, title: thread.title, readOnly: true })));
+        await start();
+      } catch (caught) {
+        if (cancelled) return;
+        setThreads([]);
+        setActiveId(null);
+        setError(caught instanceof Error ? caught.message : "Could not load saved chats");
+      } finally {
+        if (!cancelled) setHydrated(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [user, start]);
+
+  useEffect(() => {
+    if (!user || !hydrated || threads.length > 0) return;
+    void start();
+  }, [user, hydrated, threads.length, start]);
+
+  const titleFromMessage = useCallback((id: string, text: string) => {
+    const title = threadTitle(text);
+    let persist = false;
+    setThreads((current) => {
+      const thread = current.find((item) => item.id === id);
+      if (!thread || thread.readOnly || thread.title !== "New chat") return current;
+      persist = true;
+      return current.map((item) => (item.id === id ? { ...item, title } : item));
+    });
+    if (persist) {
+      setDraftTitle(id, title);
+      void updateStoredTitle(id, title).catch((caught) => console.error(caught));
+    }
+  }, []);
+
+  const renameThread = useCallback((id: string, title: string) => {
+    let persist = false;
+    setThreads((current) => {
+      const thread = current.find((item) => item.id === id);
+      if (!thread || thread.readOnly) return current;
+      persist = true;
+      return current.map((item) => (item.id === id ? { ...item, title } : item));
+    });
+    if (persist) {
+      setDraftTitle(id, title);
+      void updateStoredTitle(id, title).catch((caught) => console.error(caught));
+    }
+  }, []);
+
+  const deleteThread = useCallback((id: string) => {
+    void (async () => {
+      try {
+        await deleteStoredThread(id);
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "Could not delete chat");
+        return;
+      }
+      let remaining: ChatThread[] = [];
+      setThreads((current) => {
+        remaining = current.filter((thread) => thread.id !== id);
+        return remaining;
+      });
+      setActiveId((active) => (active === id ? (remaining[0]?.id ?? null) : active));
+    })();
+  }, []);
 
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
     setUser(null);
-    setSessionId(null);
+    setThreads([]);
+    setActiveId(null);
+    setHydrated(false);
   };
 
-  if (!authReady) {
+  if (!authReady || (user && !hydrated)) {
     return <main className="flex h-svh items-center justify-center text-sm text-muted-foreground">Loading…</main>;
   }
 
   if (!user) {
-    return <Login onLoggedIn={setUser} />;
+    return <LoginForm onLoggedIn={setUser} />;
   }
 
   return (
-    <main className="flex h-svh flex-col">
-      <div className="flex items-center justify-between gap-3 px-3 py-2">
-        <p className="truncate text-sm text-muted-foreground">{user.username}</p>
-        <div className="flex gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={() => void start()} disabled={pending}>
-            New chat
-          </Button>
-          <Button type="button" variant="ghost" size="sm" onClick={() => void logout()}>
-            Sign out
-          </Button>
-        </div>
-      </div>
-      {error ? <p className="px-4 text-sm text-destructive">{error}</p> : null}
-      <div className="min-h-0 flex-1">
-        {sessionId ? <Chat key={sessionId} sessionId={sessionId} /> : null}
-      </div>
-    </main>
+    <Sidebar
+      username={user.username}
+      threads={threads}
+      activeId={activeId}
+      pending={pending}
+      onNewChat={() => void start()}
+      onSelect={setActiveId}
+      onRename={renameThread}
+      onDelete={deleteThread}
+      onSignOut={() => void logout()}
+    >
+      <ChatStage threads={threads} activeId={activeId} error={error} onFirstMessage={titleFromMessage} />
+    </Sidebar>
   );
 }

@@ -138,7 +138,10 @@ const taskAwareGroupBy = (
 export type ThreadProps = {
   components?: ThreadComponents | undefined;
   autoFocus?: boolean | undefined;
+  readOnly?: boolean | undefined;
 };
+
+const ThreadReadOnlyContext = createContext(false);
 
 const EMPTY_COMPONENTS: ThreadComponents = {};
 
@@ -182,13 +185,16 @@ const ThreadHistorySkeleton: FC = () => (
 export const Thread: FC<ThreadProps> = ({
   components = EMPTY_COMPONENTS,
   autoFocus = true,
+  readOnly = false,
 }) => {
   const isEmpty = useAuiState(isNewChatView);
 
   return (
-    <ThreadComponentsContext.Provider value={components}>
-      <ThreadRoot isEmpty={isEmpty} autoFocus={autoFocus} />
-    </ThreadComponentsContext.Provider>
+    <ThreadReadOnlyContext.Provider value={readOnly}>
+      <ThreadComponentsContext.Provider value={components}>
+        <ThreadRoot isEmpty={isEmpty} autoFocus={autoFocus} />
+      </ThreadComponentsContext.Provider>
+    </ThreadReadOnlyContext.Provider>
   );
 };
 
@@ -197,6 +203,7 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
   autoFocus,
 }) => {
   const { Welcome = ThreadWelcome } = useContext(ThreadComponentsContext);
+  const readOnly = useContext(ThreadReadOnlyContext);
 
   return (
     <ThreadPrimitive.Root
@@ -220,7 +227,7 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
             isEmpty && "justify-center",
           )}
         >
-          <AuiIf condition={isNewChatView}>
+          <AuiIf condition={(state) => isNewChatView(state) && !readOnly}>
             <Welcome />
           </AuiIf>
           <AuiIf condition={isHistoryLoadingView}>
@@ -246,11 +253,17 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
             )}
           >
             <ThreadScrollToBottom />
-            <ThreadFollowupSuggestions />
-            <Composer autoFocus={autoFocus} />
-            <AuiIf condition={(s) => isNewChatView(s) && s.composer.isEmpty}>
-              <ThreadSuggestions />
-            </AuiIf>
+            {readOnly ? (
+              <p className="pb-2 text-center text-sm text-muted-foreground">This chat is read-only.</p>
+            ) : (
+              <>
+                <ThreadFollowupSuggestions />
+                <Composer autoFocus={autoFocus} />
+                <AuiIf condition={(s) => isNewChatView(s) && s.composer.isEmpty}>
+                  <ThreadSuggestions />
+                </AuiIf>
+              </>
+            )}
           </ThreadPrimitive.ViewportFooter>
         </div>
       </ThreadPrimitive.Viewport>
@@ -654,6 +667,7 @@ const AssistantMessage: FC = () => {
 };
 
 const AssistantActionBar: FC = () => {
+  const readOnly = useContext(ThreadReadOnlyContext);
   return (
     <ActionBarPrimitive.Root
       hideWhenRunning
@@ -669,7 +683,9 @@ const AssistantActionBar: FC = () => {
         <ActionBarPrimitive.FeedbackPositive render={<TooltipIconButton tooltip="Helpful" className="data-[submitted=true]:bg-accent data-[submitted=true]:text-accent-foreground" />}><ThumbsUpIcon /></ActionBarPrimitive.FeedbackPositive>
         <ActionBarPrimitive.FeedbackNegative render={<TooltipIconButton tooltip="Not helpful" className="data-[submitted=true]:bg-accent data-[submitted=true]:text-accent-foreground" />}><ThumbsDownIcon /></ActionBarPrimitive.FeedbackNegative>
       </AuiIf>
-      <ActionBarPrimitive.Reload render={<TooltipIconButton tooltip="Refresh" />}><RefreshCwIcon /></ActionBarPrimitive.Reload>
+      {readOnly ? null : (
+        <ActionBarPrimitive.Reload render={<TooltipIconButton tooltip="Refresh" />}><RefreshCwIcon /></ActionBarPrimitive.Reload>
+      )}
       <ActionBarMorePrimitive.Root>
         <ActionBarMorePrimitive.Trigger render={<TooltipIconButton tooltip="More" className="data-[state=open]:bg-accent" />}><MoreHorizontalIcon /></ActionBarMorePrimitive.Trigger>
         <ActionBarMorePrimitive.Content
@@ -742,6 +758,8 @@ const UserMessage: FC = () => {
 };
 
 const UserActionBar: FC = () => {
+  const readOnly = useContext(ThreadReadOnlyContext);
+  if (readOnly) return null;
   return (
     <ActionBarPrimitive.Root
       hideWhenRunning
